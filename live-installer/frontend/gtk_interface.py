@@ -76,6 +76,7 @@ class InstallerWindow:
 
         # wizard pages
         (self.PAGE_WELCOME,
+         self.PAGE_EULA,
          self.PAGE_LANGUAGE,
          self.PAGE_KEYBOARD,
          self.PAGE_TIMEZONE,
@@ -83,7 +84,7 @@ class InstallerWindow:
          self.PAGE_PARTITIONS,
          self.PAGE_USER,
          self.PAGE_OVERVIEW,
-         self.PAGE_INSTALL) = list(range(9))
+         self.PAGE_INSTALL) = list(range(10))
 
         # set the button events (wizard_cb)
         self.builder.get_object("button_next").connect(
@@ -92,6 +93,11 @@ class InstallerWindow:
             "clicked", self.wizard_cb, True)
         self.builder.get_object("button_quit").connect(
             "clicked", self.quit_cb)
+
+        
+        self.builder.get_object("check_eula").connect(
+            "clicked", self.assign_eula)
+        self.builder.get_object("text_eula").get_buffer().set_text(open("./branding/eula.txt","r").read())
 
         col = Gtk.TreeViewColumn("", Gtk.CellRendererPixbuf(), pixbuf=2)
         self.builder.get_object("treeview_language_list").append_column(col)
@@ -167,15 +173,25 @@ class InstallerWindow:
         self.builder.get_object("check_minimal").connect(
             "toggled", self.assign_options)
 
+        # options
+        self.builder.get_object("check_swap").connect(
+            "toggled", self.assign_options)
+
         # partitions
         self.builder.get_object("button_edit").connect(
-            "clicked", partitioning.manually_edit_partitions)
+            "clicked", self.manually_edit_partitions)
         self.builder.get_object("button_refresh").connect(
             "clicked", lambda _: partitioning.build_partitions(self))
         self.builder.get_object("treeview_disks").connect(
             "row_activated", partitioning.edit_partition_dialog)
         self.builder.get_object("treeview_disks").connect(
             "button-release-event", partitioning.partitions_popup_menu)
+        self.builder.get_object("treeview_disks").connect(
+            "cursor-changed", self.partition_change_event)
+        self.builder.get_object("button_add_partition").connect("clicked",self.part_add_button_event)
+        self.builder.get_object("button_remove_partition").connect("clicked",self.part_remove_button_event)
+        self.builder.get_object("button_format_partition").connect("clicked",self.part_format_button_event)
+
         text = Gtk.CellRendererText()
         for i in (partitioning.IDX_PART_PATH,
                   partitioning.IDX_PART_TYPE,
@@ -277,6 +293,9 @@ class InstallerWindow:
         if config.get("skip_options", False):
             obox.hide()
         
+        if not config.get("use_swap",False):
+            self.builder.get_object("check_swap").hide()
+
         self.i18n()
 
         # make sure we're on the right page (no pun.)
@@ -293,6 +312,7 @@ class InstallerWindow:
         # Features
         if not config.get("auto_partition_enabled", True):
             self.builder.get_object("box_automated").hide()
+            self.builder.get_object("check_swap").hide()
         if "EXPERT_MODE" not in os.environ:
             # Expert mode is only used for debuging. Please do not enable !
             self.builder.get_object("box_expert").hide()
@@ -319,6 +339,7 @@ class InstallerWindow:
         self.assign_entry("entry_confirm")
 
         self.assign_hostname(self.builder.get_object("entry_hostname"))
+        self.assign_password(None)
 
         self.builder.get_object("box_replace_win").hide()
         if config.get("replace_windows_enabled", True):
@@ -327,7 +348,7 @@ class InstallerWindow:
             for disk_path in partitioning.get_partitions():
                 log("Searching: {}".format(disk_path))
                 if 0 == os.system(
-                        "mount -o ro {} /tmp/winroot 2>/dev/null".format(disk_path)):
+                        "mount -o ro {} /tmp/winroot &>/dev/null".format(disk_path)):
                     if os.path.exists(
                             "/tmp/winroot/Windows/System32/ntoskrnl.exe"):
                         self.setup.winroot = disk_path
@@ -338,7 +359,7 @@ class InstallerWindow:
                     elif os.path.exists("/tmp/winroot/bootmgr"):
                         self.setup.winboot = disk_path
                         log("Found windows boot: {}".format(disk_path))
-                os.system("umount -lf /tmp/winroot")
+                os.system("umount -lf /tmp/winroot &>/dev/null")
             if self.setup.winroot and (
                     not self.setup.gptonefi or self.setup.winefi):
                 self.builder.get_object("box_replace_win").show_all()
@@ -349,11 +370,35 @@ class InstallerWindow:
         if config.get("hide_keyboard_model", False):
             self.builder.get_object("hbox10").hide()
 
+        if self.setup.gptonefi:
+            self.builder.get_object("label_bios_type").set_text("UEFI")
+        else:
+            self.builder.get_object("label_bios_type").set_text("Legacy")
+
         self.ui_init = True
 
 
+    def manually_edit_partitions(self,widget):
+        """ Edit only known disks, selected one first """
+        model, itervar = self.builder.get_object(
+            "treeview_disks").get_selection().get_selected()
+        # prefer disk currently selected and show it first
+        preferred = model[itervar][-1] if itervar else ''
+        disks = ' '.join(sorted((disk for disk, desc in model.disks),
+                            key=lambda disk: disk != preferred))
+        os.system('umount -f ' + disks)
+        def update_partition_menu(pid, status):
+            partitioning.build_partitions(self)
+        editor = '{} {}'.format(config.get("partition_editor", "gparted"), disks)
+        pid, stdin, stdout, stderr = GLib.spawn_async(["/bin/sh", "-c", editor],
+            flags=GLib.SPAWN_DO_NOT_REAP_CHILD,
+            standard_output=True,
+            standard_error=True)
+        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, update_partition_menu)
+
     def fullscreen(self):
-        self.window.fullscreen()
+        self.window.set_resizable(True)
+        GLib.timeout_add(300, self.window.fullscreen)
         self.builder.get_object("button_quit").show()
 
     def i18n(self):
@@ -370,6 +415,8 @@ class InstallerWindow:
         self.wizard_pages = list(range(13))
         self.wizard_pages[self.PAGE_WELCOME] = WizardPage(
             _("Welcome"), "mark-location-symbolic", "")
+        self.wizard_pages[self.PAGE_EULA] = WizardPage(
+            _("License Agreement"), "object-select-symbolic", "")
         self.wizard_pages[self.PAGE_LANGUAGE] = WizardPage(
             _("Language"), "preferences-desktop-locale-symbolic", _("What language would you like to use?"))
         self.wizard_pages[self.PAGE_TIMEZONE] = WizardPage(
@@ -397,6 +444,9 @@ class InstallerWindow:
             _("Welcome to the %s Installer.") % config.get("distro_title", "17g"))
         self.builder.get_object("label_welcome2").set_text(
             _("This program will ask you some questions and set up system on your computer."))
+        self.builder.get_object("check_eula").set_label(
+            _("I accept the terms of the License Agreement"))
+
 
         # Language page
         self.language_column.set_title(_("Language"))
@@ -459,10 +509,16 @@ class InstallerWindow:
             _("Fill the disk with random data"))
         self.builder.get_object("check_badblocks").set_tooltip_text(
             _("This provides extra security but it can take hours."))
+        self.builder.get_object("label_swap").set_text(
+            _("Create swap partition"))
 
         # Partitions page
-        self.builder.get_object("button_edit").set_label(_("Edit partitions"))
-        self.builder.get_object("button_refresh").set_label(_("Refresh"))
+        self.builder.get_object("label_edit").set_text(_("Edit partitions"))
+        self.builder.get_object("label_refresh").set_text(_("Refresh"))
+        self.builder.get_object("label_edit").set_text(_("Edit partitions"))
+        self.builder.get_object("label_delete").set_text(_("Delete"))
+        self.builder.get_object("label_format").set_text(_("Format"))
+        self.builder.get_object("label_new").set_text(_("Create"))
         for col, title in zip(self.builder.get_object("treeview_disks").get_columns(),
                               (_("Device"),
                                _("Type"),
@@ -525,6 +581,8 @@ class InstallerWindow:
             errorFound = True
         if self.setup.username == "":
             errorFound = True
+        if len(self.setup.username) > 32:
+            erroFound = True
         self.assign_entry("entry_username", errorFound)
 
     def assign_hostname(self, entry):
@@ -542,8 +600,11 @@ class InstallerWindow:
         self.assign_entry("entry_hostname", errorFound)
 
     def assign_password(self, widget):
+    
         errorFound = False
         isWeek = False
+        stronglevel = 0
+        weeklevel = 0
         self.setup.password1 = self.builder.get_object(
             "entry_password").get_text()
         self.setup.password2 = self.builder.get_object(
@@ -556,16 +617,22 @@ class InstallerWindow:
             errorFound = True
         if self.setup.password1.isnumeric():
             isWeek = True
+            weeklevel += 20
         if self.setup.password1.lower() == self.setup.password1:
             isWeek = True
+            weeklevel += 10
         if self.setup.password1.upper() == self.setup.password1:
             isWeek = True
+            weeklevel += 10
         if self.setup.password1 == self.setup.username:
             isWeek = True
+            stronglevel = 20
         if len(self.setup.password1) < 8:
             isWeek = True
+            stronglevel = 20
         if len(self.setup.password1) == 0:
             isWeek = False
+            stronglevel = 1
 
         has_char = False
         has_num = False
@@ -581,6 +648,10 @@ class InstallerWindow:
                 break
         if not has_char or not has_num:
             isWeek = True
+            weeklevel += 20
+
+        if stronglevel != 0:
+            weeklevel = 100-stronglevel
 
         self.assign_entry("entry_password", errorFound ,isWeek)
         self.week_password = isWeek
@@ -588,6 +659,7 @@ class InstallerWindow:
         # Check the password confirmation
         if(self.setup.password1 == "" or self.setup.password2 == "" or self.setup.password1 != self.setup.password2):
             errorFound = True
+        self.builder.get_object("password_strong_level").set_fraction((100-weeklevel)/100)
         self.assign_entry("entry_confirm", errorFound,isWeek)
 
     def assign_options(self, widget, data=None):
@@ -595,6 +667,8 @@ class InstallerWindow:
             "check_updates").get_active()
         self.setup.minimal_installation = self.builder.get_object(
             "check_minimal").get_active()
+        self.setup.create_swap = self.builder.get_object(
+            "check_swap").get_active()
 
     def assign_type_options(self, widget, data=None):
         self.setup.automated = self.builder.get_object(
@@ -603,6 +677,8 @@ class InstallerWindow:
             "radio_replace_win").get_active()
         self.setup.expert_mode = self.builder.get_object(
             "radio_expert_mode").get_active()
+        self.builder.get_object("check_swap").set_sensitive(
+            self.setup.automated)
         self.builder.get_object("check_badblocks").set_sensitive(
             self.setup.automated)
         self.builder.get_object("check_encrypt").set_sensitive(
@@ -815,6 +891,48 @@ class InstallerWindow:
         except NameError:
             pass  # set_keyboard_layout not set
 
+    def partition_change_event(self,widget):
+        model, itervar = widget.get_selection().get_selected()
+        self.builder.get_object("button_add_partition").set_sensitive(False)
+        self.builder.get_object("button_remove_partition").set_sensitive(False)
+        if itervar:
+            self.selected_partition = model.get_value(itervar, partitioning.IDX_PART_OBJECT) # partition opject
+            fstype = model.get_value(itervar, partitioning.IDX_PART_TYPE).replace("<span>","").replace("</span>","").strip()
+            if fstype == _('Free space'):
+                self.builder.get_object("button_add_partition").set_sensitive(True)
+            elif len(fstype) > 0:
+                self.builder.get_object("button_remove_partition").set_sensitive(True)
+
+    def part_add_button_event(self,widget):
+        start = self.selected_partition.partition.geometry.start
+        end = self.selected_partition.partition.geometry.end
+        mbr = self.selected_partition.mbr
+        if QuestionDialog(_("Are you sure?"), 
+            _("New partition will created at {}").format(mbr)):
+            os.system("parted -s {} mkpart primary ext4 {}s {}s".format(mbr,start,end))
+            partitioning.build_partitions(self)
+
+    def part_remove_button_event(self,widget):
+        path = self.selected_partition.path
+        mbr = self.selected_partition.mbr
+        partnum = partitioning.find_partition_number(path)
+        if QuestionDialog(_("Are you sure?"), 
+            _("Partition {} will removed from {}.").format(path,mbr)):
+            os.system("parted -s {} rm {}".format(mbr,partnum))
+            partitioning.build_partitions(self)
+
+    def part_format_button_event(self,widget):
+        path = self.selected_partition.path
+        mbr = self.selected_partition.mbr
+        if QuestionDialog(_("Are you sure?"), 
+            _("Partition {} will formated from {}.").format(path,mbr)):
+            os.system("yes | mkfs.ext4 {}".format(path))
+            partitioning.build_partitions(self)
+
+    def assign_eula(self,widget=None):
+        widget = self.builder.get_object("check_eula")
+        self.builder.get_object("button_next").set_sensitive(widget.get_active())
+
     def assign_language(self, treeview, data=None):
         ''' Called whenever someone updates the language '''
         if not self.ui_init:
@@ -1013,7 +1131,7 @@ class InstallerWindow:
                     _("- Must have big and small letters\n")+
                     _("- Must have number"))
                 focus_widget = self.builder.get_object("entry_password")
-                if config.get("allow_week_password", False):
+                if config.get("allow_week_password", True):
                     errorMessage+="\n\n"+_("Are you sure?")
                     if not QuestionDialog(_("Warning"),errorMessage):
                         return
@@ -1096,9 +1214,11 @@ class InstallerWindow:
                             found_efi_partition = True
                             if not partition.partition.getFlag(
                                     parted.PARTITION_BOOT):
-                                ErrorDialog(_("Installer"), _(
-                                    "The EFI partition is not bootable. Please edit the partition flags."))
-                                return
+                                if QuestionDialog(_("Installer"), _(
+                                    "The EFI partition is not bootable. Do you want to set boot flag?")):
+                                    partition.set_boot()
+                                else:
+                                    return
                             if int(float(partition.partition.getLength('MB'))) < 35:
                                 ErrorDialog(_("Installer"), _(
                                     "The EFI partition is too small. It must be at least 35MB."))
@@ -1224,8 +1344,14 @@ class InstallerWindow:
         # check each page for errors
         if not goback:
             if sel == self.PAGE_WELCOME:
-                nex = self.PAGE_LANGUAGE
+                self.assign_eula()
                 self.builder.get_object("button_back").set_sensitive(True)
+                nex = self.PAGE_EULA
+                if config.get("skip_eula", False):
+                    self.builder.get_object("button_next").set_sensitive(True)
+                    sel = nex
+            if sel == self.PAGE_EULA:
+                nex = self.PAGE_LANGUAGE
                 if config.get("skip_language", False):
                     sel = nex
             if sel == self.PAGE_LANGUAGE:
@@ -1277,8 +1403,13 @@ class InstallerWindow:
                 if config.get("skip_language", False):
                     sel = nex
             if sel == self.PAGE_LANGUAGE:
+                nex = self.PAGE_EULA
+                if config.get("skip_eula", False):
+                    sel = nex
+            if sel == self.PAGE_EULA:
                 nex = self.PAGE_WELCOME
                 self.builder.get_object("button_back").set_sensitive(False)
+                self.builder.get_object("button_next").set_sensitive(True)
         self.activate_page(nex, sel, goback)
 
     def show_overview(self):
