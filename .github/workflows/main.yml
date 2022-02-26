@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Building deb package
+        run: |
+          sudo apt update
+          sudo apt install devscripts equvis -y
+          sudo mk-build-deps --install
+          sudo debuild -us -uc -b
