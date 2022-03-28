@@ -32,7 +32,7 @@ welcome_screen: false
 # set_root_password: true
 # use_chpasswd: true
 # use_usermod: true
-# keep_userdata : true
+keep_userdata : false
 minimal_instalation_enabled: false
 additional_user_groups:
    - audio
