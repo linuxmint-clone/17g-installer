@@ -223,7 +223,7 @@ class InstallerWindow:
         self.builder.get_object("entry_hostname").connect(
             "changed", self.assign_hostname)
         product_name = open("/sys/devices/virtual/dmi/id/product_name","r").read().strip().replace(" ","-").lower()
-        self.builder.get_object("entry_hostname").set_text(product_name)
+        self.builder.get_object("entry_hostname").set_text(config.get("distro_codename","linux")+"-"+product_name)
 
         # events for detecting password mismatch..
         self.builder.get_object("entry_password").connect(
@@ -388,6 +388,18 @@ class InstallerWindow:
             self.builder.get_object("label_bios_type").set_text("UEFI")
         else:
             self.builder.get_object("label_bios_type").set_text("Legacy")
+
+        # remove unused page dots
+        if config.get("skip_eula",False):
+            self.builder.get_object("progress_%d" % self.PAGE_EULA).hide()
+        if config.get("skip_language",False):
+            self.builder.get_object("progress_%d" % self.PAGE_LANGUAGE).hide()
+        if config.get("skip_timezone",False):
+            self.builder.get_object("progress_%d" % self.PAGE_TIMEZONE).hide()
+        if config.get("skip_keyboard",False):
+            self.builder.get_object("progress_%d" % self.PAGE_KEYBOARD).hide()
+        if config.get("skip_user",False):
+            self.builder.get_object("progress_%d" % self.PAGE_USER).hide()        
 
         self.ui_init = True
         if self.testmode:
@@ -697,11 +709,17 @@ class InstallerWindow:
         self.setup.badblocks = self.builder.get_object(
             "check_badblocks").get_active()
 
-    def assign_passphrase(self, widget):
+    def assign_passphrase(self, widget=None):
         self.setup.passphrase1 = self.builder.get_object(
             "entry_passphrase").get_text()
         self.setup.passphrase2 = self.builder.get_object(
             "entry_passphrase2").get_text()
+        if self.setup.passphrase1 == "":
+            return _("Please provide a passphrase for the encryption."), ""
+        if self.setup.passphrase2 != self.setup.passphrase1:
+            return _("Your passwords do not match."), ""
+        password_error, weekMessage, weeklevel = validate.password(self.setup.passphrase1,"")
+        return password_error, weekMessage
 
     def quit_cb(self, widget, data=None):
         if QuestionDialog(_("Quit?"), _(
@@ -719,6 +737,7 @@ class InstallerWindow:
         if not isWeek and not isInvalid:
             entry.set_icon_from_icon_name(1,"password-status-ok-symbolic")
 
+    @asynchronous
     def build_lang_list(self):
 
         self.cur_timezone = config.get('default_timezone', "Europe/London")
@@ -781,6 +800,7 @@ class InstallerWindow:
         if config.get("allow_auto_novariant", True):
             self.setup.keyboard_variant = ""
 
+    @asynchronous
     def build_kb_lists(self):
         ''' Do some xml kung-fu and load the keyboard stuffs '''
         # Determine the layouts in use
@@ -1192,13 +1212,12 @@ class InstallerWindow:
                 errorMessage = _("Please select a disk.")
             self.setup.grub_device = self.setup.disk
             if self.setup.luks:
-                if (self.setup.passphrase1 is None or self.setup.passphrase1 == ""):
+                errorMessage , weekMessage = self.assign_passphrase()
+                if errorMessage != None:
                     errorFound = True
-                    errorMessage = _(
-                        "Please provide a passphrase for the encryption.")
-                elif (self.setup.passphrase1 != self.setup.passphrase1):
-                    errorFound = True
-                    errorMessage = _("Your passphrases do not match.")
+                if weekMessage != "":
+                    if not QuestionDialog(_("Your passwords is not strong."), weekMessage + "\n"+_("Are you sure?")):
+                        return
             if (errorFound):
                 WarningDialog(_("Installer"), errorMessage)
             else:
@@ -1317,6 +1336,7 @@ class InstallerWindow:
                 self.builder.get_object("button_next").set_sensitive(True)
         self.activate_page(nex, sel, goback)
 
+    @asynchronous
     def show_overview(self):
         def bold(strvar):
             return '<b>' + str(strvar) + '</b>'
@@ -1337,9 +1357,9 @@ class InstallerWindow:
             if config.get("autologin_enabled", True):
                 model.append(top, (_("Automatic login: ") + bold(_("enabled")
                                                              if self.setup.autologin else _("disabled")),))
-            if config.get("encryption_enabled", True):
-                model.append(top, (_("Home encryption: ") + bold(_("enabled")
-                                                             if self.setup.ecryptfs else _("disabled")),))
+    #        if config.get("encryption_enabled", True):
+    #            model.append(top, (_("Home encryption: ") + bold(_("enabled")
+    #                                                            if self.setup.ecryptfs else _("disabled")),))
         top = model.append(None, (_("System settings"),))
         model.append(top, (_("Computer's name: ") +
                            bold(self.setup.hostname),))
@@ -1360,12 +1380,6 @@ class InstallerWindow:
             model.append(
                 top, (bold(_("Automated installation on %s") % self.setup.diskname),))
         else:
-            if config.get("lvm_enabled", True):
-                model.append(top, (_("LVM: ") + bold(_("enabled")
-                                                     if self.setup.lvm else _("disabled")),))
-            if config.get("encryption_enabled", True):
-                model.append(top, (_("Disk Encryption: ") +
-                                   bold(_("enabled") if self.setup.luks else _("disabled")),))
             for p in self.setup.partitions:
                 if p.format_as:
                     model.append(top, (bold(_("Format %(path)s as %(filesystem)s") % {
@@ -1374,6 +1388,12 @@ class InstallerWindow:
                 if p.mount_as:
                     model.append(top, (bold(_("Mount %(path)s as %(mount)s") % {
                                  'path': p.path, 'mount': p.mount_as}),))
+        if config.get("lvm_enabled", True):
+            model.append(top, (_("LVM: ") + bold(_("enabled")
+                                   if self.setup.lvm else _("disabled")),))
+        if config.get("encryption_enabled", True):
+            model.append(top, (_("Disk Encryption: ") +
+                                   bold(_("enabled") if self.setup.luks else _("disabled")),))
         self.builder.get_object("treeview_overview").expand_all()
 
     @idle
