@@ -58,6 +58,8 @@ def get_disks():
                     0], elements[1], elements[2], elements[3], elements[1]
             else:
                 typevar, device, removable, size, model = elements
+            if size == "0B":
+                continue;
             device = "/dev/" + device
             if str(typevar) == "b'disk" and device not in exclude_devices:
                 # convert size to manufacturer's size for show, e.g. in GB, not
@@ -116,11 +118,20 @@ def find_partition_number(part):
 
 def get_partition_flags(part):
     for line in subprocess.getoutput("parted {} print".format(find_mbr(part))).split("\n"):
-        print(line)
         if line.startswith(" {} ".format(find_partition_number(part))):
             return line.replace(", ",",").split(" ")[-1].split(",")
     return []
 
+
+def get_disk_size(disk):
+    name = os.path.basename(disk)
+    lsblk = subprocess.getoutput(
+        'LC_ALL=en_US.UTF-8 lsblk -rbindo TYPE,NAME,RM,SIZE,MODEL | sort -k3,2')
+    for line in lsblk.split("\n"):
+        if line.split(" ")[1] == name:
+            return int(line.split(" ")[3])
+    return 0;
+        
 
 def build_partitions(_installer):
     global installer
@@ -349,7 +360,7 @@ def show_error(message):
     ErrorDialog(_("Installer"), message)
 
 
-def full_disk_format(device, create_boot=False, create_swap=False):
+def full_disk_format(device, create_boot=False, create_swap=False,swap_size=1024):
     # Create a default partition set up
     disk_label = ('gpt' if device.getLength('B') > 2**32 * .9 * device.sectorSize  # size of disk > ~2TB
                   or is_efi_supported()
@@ -365,12 +376,7 @@ def full_disk_format(device, create_boot=False, create_swap=False):
             _("The partition table couldn't be written for %s. Restart the computer and try again.") % device.path)
         Gtk.main_quit()
         sys.exit(1)
-    if config.get("swap_size","0") == "0":
-        ram_size = int(getoutput("awk '/^MemTotal/{ print $2 }' /proc/meminfo")) / 1024
-        swap_size = min(8800, int(ram_size))
-    else:
-        swap_size = config.get("swap_size","0")
-        
+    
     mkpart = (
         # (condition, mount_as, format_as, mkfs command, size_mb)
         # EFI
