@@ -1,11 +1,11 @@
 ### 17g installer config
 
 ## Distro section
-distro_codename: puffos
-distro_title: PuffOS
+distro_codename: aleyna
+distro_title: Aleyna Tilki Linux
 # distribution: auto
 # display_manager: auto
-copyright: PuffOS Developer Team
+copyright: Aleyna Tilki fans
 
 ## Base options section
 # loop_directory: /dev/loop0
