@@ -1,11 +1,11 @@
 ### 17g installer config
 
 ## Distro section
-distro_codename: aleyna
-distro_title: Aleyna Tilki Linux
+distro_codename: muslim
+distro_title: Muslim Linux
 # distribution: auto
 # display_manager: auto
-copyright: Aleyna Tilki fans
+copyright: for the muslim world
 
 ## Base options section
 # loop_directory: /dev/loop0
@@ -64,9 +64,9 @@ set_alternative_ui: true
 # skip_user: false
 hide_keyboard_model: true
 # allow_uppercase_hostname: true
-allow_week_password: true
+allow_week_password: false
 # allow_auto_novariant: false
-min_password_length: 1
+min_password_length: 8
 
 ## Pre/Post operations section
 # post_install_hook:
@@ -77,3 +77,4 @@ min_password_length: 1
 #   - echo "BRUH"
 # post_rsync_hook:
 #   - echo "BRUH"
+
