@@ -5,7 +5,7 @@ distro_codename: mint
 distro_title: Linux Mint
 # distribution: auto
 # display_manager: auto
-copyright: unofficial mint clone
+copyright: unofficial linuxmint clone
 
 ## Base options section
 # loop_directory: /dev/loop0
@@ -27,7 +27,7 @@ welcome_screen: false
 #   - 17g-installer
 
 ## User section
-# autologin_enabled: true
+autologin_enabled: false
 # auto_partition_enabled: true
 # set_root_password: true
 # use_chpasswd: true
