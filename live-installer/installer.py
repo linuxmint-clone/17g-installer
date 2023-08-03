@@ -5,6 +5,7 @@ import gettext
 import parted
 import frontend.partitioning as partitioning
 import config
+import shutil
 from utils import run, set_governor, is_cmd
 from logger import log, err, inf, set_logfile
 
@@ -897,6 +898,9 @@ class InstallerEngine:
                     time.sleep(0.1)
                 else:
                     self.update_progress(line)
+        if os.path.isdir("/lib/live-installer/hooks/"):
+            for file in os.listdir("/lib/live-installer/hooks/"):
+                self.run_and_update("/bin/sh /lib/live-installer/hooks/{} \"{}\"".format(file,hook))
 
     def do_check_grub(self):
         self.update_progress(_("Checking bootloader"), True)
@@ -943,6 +947,19 @@ class InstallerEngine:
 
 
 class Setup(object):
+    def __init__(self):
+        self.objects = {}
+
+    def set(self, name="", obj=None):
+       if obj:
+          self.objects[str(name)] = obj
+
+    def get(self, name=""):
+        if name in self.objects:
+            return self.objects[name]
+        else:
+            return None
+
     language = None
     timezone = None
     keyboard_model = None

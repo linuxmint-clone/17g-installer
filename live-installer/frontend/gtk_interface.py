@@ -151,7 +151,7 @@ class InstallerWindow:
         self.builder.get_object("combo_disk").pack_start(renderer_text, True)
         self.builder.get_object("combo_disk").add_attribute(
             renderer_text, "text", 0)
-        if len(partitioning.get_disks()) == 1:
+        if len(partitioning.get_disks()) >= 1:
             self.builder.get_object("combo_disk").set_active_iter(disk_iterators[0])
             model = self.builder.get_object("combo_disk").get_model()
             row = model[0]
@@ -230,6 +230,20 @@ class InstallerWindow:
             if c.lower() in "abcdefghijklmnopqrstuvwxyz.1234567890-":
                 product_name += c
         self.builder.get_object("entry_hostname").set_text(config.get("distro_codename","linux")+"-"+product_name)
+
+        # events for enter
+        def enter_event(widget=None, name=""):
+            self.builder.get_object(name).grab_focus()
+        self.builder.get_object("entry_name").connect(
+            "activate",enter_event, "entry_hostname")
+        self.builder.get_object("entry_hostname").connect(
+            "activate",enter_event, "entry_username")
+        self.builder.get_object("entry_username").connect(
+            "activate",enter_event, "entry_password")
+        self.builder.get_object("entry_password").connect(
+            "activate",enter_event, "entry_confirm")
+        self.builder.get_object("entry_confirm").connect(
+            "activate",self.wizard_cb, False)
 
         # events for detecting password mismatch..
         self.builder.get_object("entry_password").connect(
@@ -404,7 +418,7 @@ class InstallerWindow:
         if config.get("skip_keyboard",False):
             self.builder.get_object("progress_%d" % self.PAGE_KEYBOARD).hide()
         if config.get("skip_user",False):
-            self.builder.get_object("progress_%d" % self.PAGE_USER).hide()        
+            self.builder.get_object("progress_%d" % self.PAGE_USER).hide()
 
         self.ui_init = True
         if self.testmode:
@@ -1230,10 +1244,12 @@ class InstallerWindow:
         self.builder.get_object("notebook1").set_visible_child_name(str(nex))
 
     def activate_page_type(self):
-        if self.testmode or self.setup.expert_mode:
+        if self.testmode or self.builder.get_object("radio_expert_mode").get_active():
             self.activate_page(self.PAGE_USER)
+            self.builder.get_object("entry_name").grab_focus()
+
             return
-        if self.setup.automated:
+        if self.builder.get_object("radio_automated").get_active():
             errorFound = False
             errorMessage = ""
             if self.setup.disk is None:
@@ -1258,7 +1274,7 @@ class InstallerWindow:
                         self.activate_page(self.PAGE_OVERVIEW)
                     else:
                         self.activate_page(self.PAGE_USER)
-        elif self.setup.replace_windows:
+        elif self.builder.get_object("radio_replace_win").get_active():
             rootfs = partitioning.PartitionBase()
             rootfs.path = self.setup.winroot
             rootfs.format_as = 'ext4'
@@ -1407,8 +1423,15 @@ class InstallerWindow:
             return
         if self.builder.get_object("radio_automated").get_active():
             self.setup.grub_device = self.setup.disk
+            swap_info = ""
+            if self.builder.get_object("check_swap").get_active():
+                swap_info = self.builder.get_object("swap_size").get_text()
+                if swap_info != "0":
+                    swap_info = _(" (with %s GB swap)") % swap_info
+                else:
+                    swap_info = ""
             model.append(
-                top, (bold(_("Automated installation on %s") % self.setup.diskname),))
+                top, (bold(_("Automated installation on %s") % self.setup.diskname)+ swap_info,))
         else:
             for p in self.setup.partitions:
                 if p.format_as:
